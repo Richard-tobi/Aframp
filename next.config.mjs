@@ -62,4 +62,4 @@ const withAnalyzer = withBundleAnalyzer({
   openAnalyzer: false,
 })
 
-export default withSentryConfig(withAnalyzer(nextConfig))
+export default withSentryConfig(withAnalyzer(nextConfig));

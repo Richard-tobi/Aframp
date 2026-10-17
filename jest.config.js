@@ -40,4 +40,4 @@ module.exports = async () => {
     '/node_modules/(?!(rettime|until-async|strict-event-emitter|@mswjs|@open-draft)/)',
   ]
   return config
-}
+};
