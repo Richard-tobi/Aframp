@@ -1,10 +1,7 @@
 node_modules
-.env
-.env.local
 .next
 dist
 build
-.vscode
 .DS_Store
 requirements.md
 .vercel
@@ -15,3 +12,7 @@ playwright-report/
 .claude 
 tsconfig.tsbuildinfo
 designs
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+config.bat
