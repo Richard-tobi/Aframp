@@ -23,6 +23,9 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      - name: Knip
+        run: npm run knip
+
       - name: Prettier Check
         run: npm run format:check
 
