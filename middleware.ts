@@ -1,43 +1,64 @@
-import { Ratelimit } from '@upstash/ratelimit'
-import { Redis } from '@upstash/redis'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 
-const ratelimit = new Ratelimit({
-  redis: new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-  }),
-  limiter: Ratelimit.slidingWindow(100, '1 m'),
-  analytics: false,
-})
+/**
+ * Per-request CSP nonce middleware (#632).
+ *
+ * Generates a cryptographically random nonce for every request and embeds it
+ * in the Content-Security-Policy header, replacing the broad 'unsafe-inline'
+ * directive with 'nonce-{nonce}'. The nonce is forwarded to the page via the
+ * `x-nonce` response header so that layout.tsx can read it with `headers()`
+ * and apply it to inline <script> tags.
+ *
+ * This middleware runs on every non-static, non-API-internal route.
+ */
+export function middleware(request: NextRequest) {
+  // 16 random bytes → 22-character base64url string (no padding).
+  const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
+  const nonce = Buffer.from(nonceBytes).toString('base64url')
 
-export async function middleware(request: NextRequest) {
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '127.0.0.1'
+  // React's dev tooling evaluates strings; production stays nonce-only.
+  const devEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : ''
 
-  const { success, limit, remaining, reset } = await ratelimit.limit(ip)
+  const csp = [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}'${devEval}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://api.coingecko.com https://horizon.stellar.org https://horizon-testnet.stellar.org https://status.stellar.org https://*.sentry.io https://*.ingest.us.sentry.io https://vitals.vercel-insights.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ')
 
-  if (!success) {
-    return NextResponse.json(
-      { error: 'Too many requests. Please try again later.' },
-      {
-        status: 429,
-        headers: {
-          'X-RateLimit-Limit': String(limit),
-          'X-RateLimit-Remaining': String(remaining),
-          'X-RateLimit-Reset': String(reset),
-          'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)),
-        },
-      }
-    )
-  }
+  // Next.js reads the nonce from the *request* CSP header to stamp it on its own
+  // inline scripts, and layout.tsx reads x-nonce via headers(). Without these
+  // the CSP blocks Next's bootstrap scripts and the app never hydrates.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+  requestHeaders.set('Content-Security-Policy', csp)
 
-  const response = NextResponse.next()
-  response.headers.set('X-RateLimit-Limit', String(limit))
-  response.headers.set('X-RateLimit-Remaining', String(remaining))
-  response.headers.set('X-RateLimit-Reset', String(reset))
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
+
+  response.headers.set('x-nonce', nonce)
+  response.headers.set('Content-Security-Policy', csp)
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('X-XSS-Protection', '1; mode=block')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+
   return response
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  /**
+   * Run on all routes except Next.js internals and static file serving.
+   * This ensures every HTML page response carries a fresh nonce.
+   */
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|sw.js|workbox-|manifest).*)'],
 }

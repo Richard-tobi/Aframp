@@ -1,211 +1,583 @@
-# 🤝 How to Contribute
+# Contributing to AFRAMP
 
-We welcome contributions from the community! To ensure a smooth process, please follow these guidelines.
+Thank you for your interest in contributing to AFRAMP! This guide will help you get started.
 
-## Development Setup
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [Frontend vs backend](#frontend-vs-backend)
+- [Contributing via dev-frontend](#contributing-via-dev-frontend)
+- [Development Workflow](#development-workflow)
+- [Code Standards](#code-standards)
+- [Error Display Conventions](#error-display-conventions)
+- [Testing](#testing)
+- [Submitting Changes](#submitting-changes)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- Node.js v18 or higher
-- npm or pnpm
+- Node.js ≥20.0.0
+- npm ≥10.0.0
 - Git
-- A Stellar wallet (Freighter recommended)
+- GitHub account
 
-### Installation
+### Setup
+
+For the backend client contract used by the frontend, see the OpenAPI spec in [openapi.yaml](openapi.yaml). It documents the endpoints surfaced by [lib/api.ts](lib/api.ts) and is kept in sync with API changes.
+
+1. **Fork the repository**
+
+   ```bash
+   # On GitHub, click "Fork"
+   ```
+
+2. **Clone your fork**
+
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/aframp.git
+   cd aframp
+   ```
+
+3. **Add upstream remote**
+
+   ```bash
+   git remote add upstream https://github.com/aframp/aframp.git
+   ```
+
+4. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+5. **Create a feature branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+---
+
+## Development Workflow
+
+### 1. Create Feature Branch
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/Aframp.git
-cd Aframp
+# Update main branch
+git checkout main
+git pull upstream main
 
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env.local
-# Edit .env.local with your configuration
-
-# Start development server
-npm run dev
+# Create feature branch
+git checkout -b feature/descriptive-name
 ```
 
-Visit `http://localhost:3000` to see the app.
+**Branch naming conventions:**
 
-## Testing Requirements
+- `feature/` - New features
+- `fix/` - Bug fixes
+- `docs/` - Documentation
+- `refactor/` - Code refactoring
+- `test/` - Test additions
+- `chore/` - Maintenance tasks
 
-### Before Submitting a PR
+### 2. Make Changes
 
-All PRs must pass the following checks:
+```bash
+# Edit files
+# Run tests frequently
+npm run test:watch
 
-1. **Code Quality**
+# Check code quality
+npm run lint
+npm run format:check
+npm run type-check
+```
 
-   ```bash
-   npm run lint        # ESLint
-   npm run format:check # Prettier
-   npm run type-check  # TypeScript
-   ```
+### 3. Commit Changes
 
-2. **Tests**
+```bash
+# Stage changes
+git add .
 
-   ```bash
-   npm run test:coverage
-   ```
+# Commit with conventional commit format
+git commit -m "feat: add new payment method"
+```
 
-   - Minimum 70% coverage required
-   - All tests must pass
-   - Add tests for new features
+**Commit message format:**
 
-3. **Build**
+```
+<type>(<scope>): <subject>
 
-   ```bash
-   npm run build
-   ```
+<body>
 
-   - Must build successfully
-   - Bundle size must be within limits
+<footer>
+```
+
+**Types:**
+
+- `feat` - New feature
+- `fix` - Bug fix
+- `docs` - Documentation
+- `style` - Code style (formatting)
+- `refactor` - Code refactoring
+- `test` - Test additions
+- `chore` - Maintenance
+
+**Example:**
+
+```
+feat(kyc): add document verification
+
+Add support for document verification in KYC flow.
+Implements OCR-based validation for ID documents.
+
+Closes #123
+```
+
+### 4. Push Changes
+
+```bash
+git push origin feature/your-feature-name
+```
+
+### 5. Create Pull Request
+
+1. Go to GitHub
+2. Click "New Pull Request"
+3. Select your branch
+4. Fill in PR template
+5. Submit for review
+
+---
+
+## Frontend vs backend
+
+This repository is the **merchant frontend only**. The API, database and all business logic live in [`kellymusk/aframp-backend`](https://github.com/kellymusk/aframp-backend).
+
+- **Don't build backend features here.** No new API routes, database code, migrations or ORM/database packages. The only server routes this repo owns are `app/api/session` (session cookie bridge) and `app/api/banks` (cached bank list).
+- **The frontend calls the backend through the `/backend` proxy** configured in `next.config.mjs` (see [`docs/adr-001-backend-proxy.md`](docs/adr-001-backend-proxy.md)), using `lib/api/*`.
+- **The API contract is the backend's `openapi.yaml`.** If a feature needs an endpoint that doesn't exist, open an issue in `kellymusk/aframp-backend` and label the frontend issue `blocked: backend` until it ships.
+
+The [`No Backend Guard`](.github/workflows/no-backend-guard.yml) check fails any PR that adds API routes, database/server code or database dependencies to this repo.
+
+---
+
+## Contributing via dev-frontend
+
+If you want to build or experiment with frontend features **without touching the production frontend**, use the `dev-frontend` branch. It is a sandboxed workflow designed to prevent accidental changes to production files.
+
+### The sandbox directory
+
+All work on this branch lives inside the [`dev-frontend/`](dev-frontend/) directory. Create your own feature folder there (e.g. `dev-frontend/my-feature/`) for new components, pages, hooks, tests, and docs. You may read the main frontend code for reference, but must not edit it.
+
+See [`dev-frontend/README.md`](dev-frontend/README.md) for full setup instructions and rules.
+
+### Protected paths
+
+The following paths are the production codebase and **must not be modified** from the `dev-frontend` branch:
+
+| Protected path    | Contents                     |
+| ----------------- | ---------------------------- |
+| `app/`            | Next.js routes and pages     |
+| `components/`     | Shared UI components         |
+| `lib/`            | Core libraries and utilities |
+| `hooks/`          | Shared React hooks           |
+| `styles/`         | Global styles                |
+| `public/`         | Static assets                |
+| `types/`          | Shared TypeScript types      |
+| `next.config.mjs` | Next.js configuration        |
+| `next-env.d.ts`   | Next.js type declarations    |
+
+### Guard CI
+
+The workflow [`.github/workflows/dev-frontend-guard.yml`](.github/workflows/dev-frontend-guard.yml) runs on every push to, and every pull request targeting, `dev-frontend`. It diffs the changed files and **fails the check** if any file matches a protected path, listing the offending files in the job output. If it fails, revert those changes (e.g. `git checkout upstream/dev-frontend -- <file>`) and move your work into `dev-frontend/`.
+
+Once reviewed and approved, a maintainer will merge or cherry-pick sandbox work into `main` with full test coverage.
+
+### Quick-start checklist
+
+- [ ] Fork the repo and clone your fork
+- [ ] Add the upstream remote: `git remote add upstream https://github.com/kellymusk/Aframp.git`
+- [ ] Branch from `dev-frontend`: `git fetch upstream && git checkout -b feat/my-feature upstream/dev-frontend`
+- [ ] Read [`dev-frontend/README.md`](dev-frontend/README.md)
+- [ ] Create your feature folder: `mkdir dev-frontend/my-feature`
+- [ ] Keep all changes inside `dev-frontend/` (check with `git diff --name-only upstream/dev-frontend`)
+- [ ] Use [conventional commits](#3-commit-changes)
+- [ ] Open your PR against the **`dev-frontend`** branch (not `main`)
+- [ ] Confirm the **Dev-Frontend Guard** check passes
+
+---
+
+## Code Standards
+
+### TypeScript
+
+- Use strict mode (enabled by default)
+- Add explicit return types to functions
+- Avoid `any` type (use `unknown` if needed)
+- Use interfaces for object shapes
+
+```typescript
+// ✅ Good
+interface User {
+  id: string
+  name: string
+  email: string
+}
+
+function getUser(id: string): Promise<User> {
+  // ...
+}
+
+// ❌ Avoid
+function getUser(id: any): any {
+  // ...
+}
+```
+
+### React Components
+
+- Use functional components with hooks
+- Keep components focused and reusable
+- Add prop types/interfaces
+- Use meaningful component names
+
+```typescript
+// ✅ Good
+interface ButtonProps {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+}
+
+export function Button({ label, onClick, disabled }: ButtonProps) {
+  return (
+    <button onClick={onClick} disabled={disabled}>
+      {label}
+    </button>
+  )
+}
+
+// ❌ Avoid
+export function Btn(props: any) {
+  return <button {...props} />
+}
+```
+
+### Styling
+
+- Use Tailwind CSS classes
+- Avoid inline styles
+- Use CSS modules for complex styles
+- Follow mobile-first approach
+
+```typescript
+// ✅ Good
+<div className="flex flex-col gap-4 md:flex-row">
+  <button className="px-4 py-2 bg-blue-500 text-white rounded">
+    Click me
+  </button>
+</div>
+
+// ❌ Avoid
+<div style={{ display: 'flex', flexDirection: 'column' }}>
+  <button style={{ padding: '8px 16px', backgroundColor: 'blue' }}>
+    Click me
+  </button>
+</div>
+```
+
+### File Organization
+
+```
+components/
+├── common/           # Reusable components
+│   ├── Button.tsx
+│   └── Modal.tsx
+├── kyc/              # Feature-specific
+│   ├── KycForm.tsx
+│   └── KycStatus.tsx
+└── __tests__/        # Tests
+    └── Button.test.tsx
+```
+
+---
+
+## Error Display Conventions
+
+Error handling in the UI follows a single, documented convention so contributors don't have to guess which pattern to use. Pick the component based on **where** the error occurs, not personal preference.
+
+### `ErrorState` — full-page load failures
+
+Use [`ErrorState`](components/ui/error-state.tsx) when a **page-level data fetch fails** and the user has nothing meaningful to interact with until it succeeds. It renders a centered, full-page message and a **retry button** wired to `onRetry`.
+
+```tsx
+// ✅ Full-page load failure with retry
+if (error) {
+  return <ErrorState message={error} onRetry={refetch} />
+}
+```
+
+- Always pass `onRetry` so the user can recover without a full reload.
+- Use it for top-level page loads (e.g. `app/(app)/home/page.tsx`, `app/(app)/withdraw/page.tsx`).
+- Do **not** use it for errors that occur after the page has already rendered content.
+
+### `Alert` — inline form/action errors
+
+Use [`Alert`](components/ui/alert.tsx) with `variant="destructive"` for errors tied to a **specific form, field, or action** while the rest of the page stays usable.
+
+```tsx
+// ✅ Inline form/action error
+<Alert variant="destructive">
+  <AlertDescription>{error}</AlertDescription>
+</Alert>
+```
+
+- Place it next to the form or action that produced the error.
+- Use it for validation failures, failed submissions, and transient action errors.
+- Do **not** use it as a replacement for a full-page load failure.
+
+### Quick reference
+
+| Situation                                | Component                     |
+| ---------------------------------------- | ----------------------------- |
+| Page-level fetch failed, nothing to show | `ErrorState` (with `onRetry`) |
+| Form validation / submit / action failed | `Alert variant="destructive"` |
+
+When adding a new page, follow this convention rather than choosing arbitrarily. If you find an existing page that violates it, fix it as part of your change.
+
+---
+
+## Testing
+
+### Backend BigInt Fields
+
+Every backend wire field carrying a large integer must be added to `BIGINT_KEYS` in [lib/api.ts](lib/api.ts) and to the field-name alternatives in `parseWithBigInts`' pre-parse regex. Both are required to avoid precision loss in `JSON.parse`. Add or update coverage in [lib/**tests**/api.test.ts](lib/__tests__/api.test.ts).
 
 ### Writing Tests
 
-We use Jest and React Testing Library. Tests should cover:
-
-- **Unit tests** for utility functions
-- **Integration tests** for components
-- **Edge cases** and error handling
-
-Example test structure:
-
 ```typescript
+// components/__tests__/Button.test.tsx
 import { render, screen } from '@testing-library/react'
-import { MyComponent } from './MyComponent'
+import userEvent from '@testing-library/user-event'
+import { Button } from '../Button'
 
-describe('MyComponent', () => {
-  it('renders correctly', () => {
-    render(<MyComponent />)
-    expect(screen.getByText('Hello')).toBeInTheDocument()
+describe('Button', () => {
+  it('renders with label', () => {
+    render(<Button label="Click me" onClick={() => {}} />)
+    expect(screen.getByText('Click me')).toBeInTheDocument()
+  })
+
+  it('calls onClick when clicked', async () => {
+    const onClick = jest.fn()
+    render(<Button label="Click me" onClick={onClick} />)
+
+    await userEvent.click(screen.getByText('Click me'))
+    expect(onClick).toHaveBeenCalled()
   })
 })
 ```
 
-## Pull Request Process
-
-### 1. Fork and Create Branch
+### Running Tests
 
 ```bash
-# Fork the repository on GitHub
-# Clone your fork
-git clone https://github.com/YOUR_USERNAME/Aframp.git
-cd Aframp
+# Run all tests
+npm run test
 
-# Create a feature branch
-git checkout -b feat/your-feature-name
-# or
-git checkout -b fix/bug-description
-```
-
-### 2. Make Changes
-
-- Write clear, well-commented code
-- Follow existing code style
-- Add tests for new features
-- Update documentation if needed
-
-### 3. Commit Changes
-
-We use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```bash
-git commit -m "feat(onramp): add KES currency support"
-git commit -m "fix(validation): correct wallet address regex"
-git commit -m "docs(readme): update setup instructions"
-```
-
-**Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
-### 4. Push and Create PR
-
-```bash
-git push origin feat/your-feature-name
-```
-
-Then open a PR on GitHub with:
-
-- Clear title following conventional commits
-- Description of changes
-- Screenshots for UI changes
-- Link to related issue
-
-### 5. PR Review
-
-- CI checks must pass (code quality, tests, build, Lighthouse)
-- At least 1 approval required
-- Address review feedback
-- Keep PR up to date with main branch
-
-## When CI Fails
-
-### Code Quality Failures
-
-```bash
-npm run lint -- --fix
-npm run format
-npm run type-check
-```
-
-### Test Failures
-
-```bash
+# Watch mode (re-run on changes)
 npm run test:watch
-npm test -- path/to/test.test.ts
+
+# Coverage report
 npm run test:coverage
+```
+
+### End-to-End Tests
+
+Install the Chromium browser once after installing npm dependencies, then run the Playwright suite:
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The Playwright configuration starts the Next.js development server on port 3001. The E2E tests
+intercept backend requests so the login and payment-request flows do not require a running API.
+
+### Coverage Requirements
+
+- **Minimum:** 70% across all metrics
+- **Target:** 80%+ for new code
+- **Metrics:** Lines, Statements, Functions, Branches
+
+### Codecov Setup
+
+This repository uploads coverage reports to Codecov in CI. Before opening or updating a PR, add the repository secret `CODECOV_TOKEN` in the GitHub repository settings under `Settings -> Secrets and variables -> Actions`.
+
+The token is required for the `codecov/codecov-action` step in the CI workflow to publish results to Codecov after `npm run test:coverage` completes.
+
+---
+
+## Submitting Changes
+
+### Before Submitting
+
+1. **Run local CI checks**
+
+   ```bash
+   ./test-ci-local.sh
+   ```
+
+2. **Verify all checks pass**
+   - ✅ ESLint
+   - ✅ Prettier
+   - ✅ TypeScript
+   - ✅ Tests
+   - ✅ Build
+
+3. **Update documentation**
+   - Add/update comments
+   - Update README if needed
+   - Document breaking changes
+
+### PR Checklist
+
+- [ ] Branch created from `develop` or `main`
+- [ ] Commits follow conventional format
+- [ ] Tests added/updated
+- [ ] Coverage maintained (≥70%)
+- [ ] Code follows style guide
+- [ ] Documentation updated
+- [ ] No console errors/warnings
+- [ ] Local CI checks pass
+
+### PR Description Template
+
+```markdown
+## Description
+
+Brief description of changes
+
+## Type of Change
+
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
+
+## Related Issues
+
+Closes #123
+
+## Testing
+
+Describe testing performed
+
+## Screenshots (if applicable)
+
+Add screenshots for UI changes
+
+## Checklist
+
+- [ ] Tests pass
+- [ ] Coverage maintained
+- [ ] Documentation updated
+```
+
+---
+
+## CI/CD Pipeline
+
+### Automated Checks
+
+When you push or create a PR, GitHub Actions automatically runs:
+
+1. **Code Quality** (2-3 min)
+   - ESLint
+   - Prettier
+   - TypeScript
+
+2. **Tests** (3-5 min)
+   - Jest tests
+   - Coverage report
+   - Codecov upload
+
+3. **Build** (4-6 min)
+   - Next.js production build
+   - Artifact upload
+
+### Workflow Status
+
+- ✅ All checks pass → Ready to merge
+- ❌ Any check fails → Fix issues and push again
+- ⏳ Checks running → Wait for completion
+
+### Viewing Results
+
+1. Go to PR
+2. Scroll to "Checks" section
+3. Click on failed check to see logs
+4. Fix issues locally
+5. Push again
+
+---
+
+## Troubleshooting
+
+### Tests Failing
+
+```bash
+# Clear cache and reinstall
+rm -rf node_modules package-lock.json
+npm install
+
+# Run tests
+npm run test:coverage
+```
+
+### Linting Errors
+
+```bash
+# Auto-fix formatting
+npm run format
+
+# Check remaining issues
+npm run lint
 ```
 
 ### Build Failures
 
 ```bash
-npm run build
-rm -rf .next node_modules
-npm install
+# Check TypeScript
+npm run type-check
+
+# Try clean build
+rm -rf .next
 npm run build
 ```
 
-### Lighthouse Failures
+### Git Issues
 
-- **Performance:** Optimize images, reduce bundle size
-- **Accessibility:** Add alt text, ARIA labels, proper headings
+```bash
+# Update branch with latest main
+git fetch upstream
+git rebase upstream/main
 
-## Code Style Guidelines
+# Force push (use carefully!)
+git push origin feature/name --force-with-lease
+```
 
-### TypeScript
+---
 
-- Use strict mode
-- Avoid `any` (use `unknown` or proper types)
-- Export types and interfaces
+## Code Review Process
 
-### React Components
+### What Reviewers Look For
 
-- Use functional components with hooks
-- Extract complex logic to custom hooks
-- Use TypeScript for props
-
-### File Naming
-
-- Components: `PascalCase.tsx`
-- Hooks: `use-kebab-case.ts`
-- Utils: `kebab-case.ts`
-- Tests: `*.test.ts` or `*.test.tsx`
-
-## Git Hooks
-
-We use Husky for git hooks:
-
-- **pre-commit:** Runs lint-staged (lints and formats staged files)
-- **pre-push:** Runs tests
-- **commit-msg:** Validates commit message format
-
-## Need Help?
-
-- 📖 Read the [CI/CD documentation](./docs/CI-CD.md)
-- 🐛 Open an issue for bugs
-- 💡 Open a discussion for feature ideas
-
-Thank you for contributing to AFRAMP! 🌍🚀
+- ✅ Code follows style guide
+- ✅ Tests are comprehensive
+- ✅ No breaking changes
+- ✅ Documentation

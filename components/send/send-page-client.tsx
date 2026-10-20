@@ -1,22 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, QrCode, ChevronRight, Wallet, StickyNote } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { RecentRecipients } from './recent-recipients'
+import { RecentRecipients, Contact } from './recent-recipients'
 import { QRScanner } from './qr-scanner'
 import { TransactionConfirmation } from './transaction-confirmation'
-import {
-  isValidStellarAddress,
-  estimateStellarFee,
-  sendStellarP2P,
-} from '@/lib/stellar-p2p'
-import { getFreighterPublicKey, getFreighterNetwork } from '@/lib/wallet/freighter'
+import { api, type Balance } from '@/lib/api'
+import { formatStroops, parseAmountToStroops } from '@/lib/money'
+import { useAuthenticatedSession } from '@/components/session-provider'
 
-type Step = 'recipient' | 'amount' | 'confirm' | 'success'
+type Step = 'recipient' | 'amount' | 'confirm' | 'success' | 'failure'
 
 export interface CryptoAsset {
   symbol: string
@@ -33,12 +30,30 @@ export interface SendFormState {
   note: string
 }
 
-export const ASSETS: CryptoAsset[] = [
-  { symbol: 'XLM', name: 'Stellar Lumens', balance: '1,245.00', icon: '✦', color: 'text-sky-400' },
-  { symbol: 'USDC', name: 'USD Coin', balance: '500.00', icon: '$', color: 'text-blue-400' },
-  { symbol: 'BTC', name: 'Bitcoin', balance: '0.0021', icon: '₿', color: 'text-amber-400' },
-  { symbol: 'ETH', name: 'Ethereum', balance: '0.142', icon: 'Ξ', color: 'text-indigo-400' },
+/** Static asset metadata (display icons/colors). Balances are injected at runtime via the `balances` prop. */
+const ASSET_META: Omit<CryptoAsset, 'balance'>[] = [
+  { symbol: 'XLM', name: 'Stellar Lumens', icon: '✦', color: 'text-sky-400' },
+  { symbol: 'USDC', name: 'USD Coin', icon: '$', color: 'text-blue-400' },
+  { symbol: 'BTC', name: 'Bitcoin', icon: '₿', color: 'text-amber-400' },
+  { symbol: 'ETH', name: 'Ethereum', icon: 'Ξ', color: 'text-indigo-400' },
 ]
+
+/**
+ * Build the full CryptoAsset list by merging static metadata with live
+ * balances from the API. Any asset not present in `balances` shows "0".
+ */
+export function buildAssets(balances: Balance[]): CryptoAsset[] {
+  return ASSET_META.map((meta) => {
+    const bal = balances.find((b) => b.asset === meta.symbol)
+    return {
+      ...meta,
+      balance: bal ? formatStroops(bal.available) : '0',
+    }
+  })
+}
+
+/** @deprecated Use `buildAssets(balances)` instead — this constant has hardcoded mock balances. */
+export const ASSETS: CryptoAsset[] = buildAssets([])
 
 const NUMPAD_KEYS = [
   ['1', '2', '3'],
@@ -47,30 +62,30 @@ const NUMPAD_KEYS = [
   ['.', '0', '⌫'],
 ]
 
-export function SendPageClient() {
+export interface SendPageClientProps {
+  /** Live balances from the API. Each asset's `available` stroops are formatted for display. */
+  balances?: Balance[]
+}
+
+export function SendPageClient({ balances = [] }: SendPageClientProps) {
   const router = useRouter()
+  const { token } = useAuthenticatedSession()
+  const assets = buildAssets(balances)
   const [step, setStep] = useState<Step>('recipient')
   const [scannerOpen, setScannerOpen] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
-  const [txHash, setTxHash] = useState<string | null>(null)
-  const [estimatedFee, setEstimatedFee] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [failureReason, setFailureReason] = useState<string | null>(null)
   const [recipientInput, setRecipientInput] = useState('')
   const [form, setForm] = useState<SendFormState>({
     recipient: null,
     amount: '',
-    asset: ASSETS[0],
+    asset: assets[0],
     note: '',
   })
 
   const steps: Step[] = ['recipient', 'amount', 'confirm']
   const currentStepIdx = steps.indexOf(step)
-
-  // Fetch fee estimate when entering the confirm step
-  useEffect(() => {
-    if (step !== 'confirm') return
-    estimateStellarFee(null).then(setEstimatedFee).catch(() => setEstimatedFee(null))
-  }, [step])
 
   const handleBack = () => {
     if (step === 'recipient') {
@@ -80,7 +95,7 @@ export function SendPageClient() {
     } else if (step === 'confirm') {
       setStep('amount')
     } else {
-      router.push('/dashboard')
+      router.push('/home')
     }
   }
 
@@ -118,48 +133,117 @@ export function SendPageClient() {
     setForm((prev) => ({ ...prev, amount: prev.amount + key }))
   }
 
+  useEffect(() => {
+    if (step !== 'amount') return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const { key } = event
+
+      if (key >= '0' && key <= '9') {
+        event.preventDefault()
+        handleNumpad(key)
+        return
+      }
+
+      if (key === 'Backspace') {
+        event.preventDefault()
+        handleNumpad('⌫')
+        return
+      }
+
+      if (key === '.') {
+        event.preventDefault()
+        handleNumpad('.')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [step, form.amount])
+
   const handleSend = async () => {
-    if (!form.recipient?.address) return
+    setError(null)
+    setFailureReason(null)
+
+    const destinationAddress = form.recipient?.address
+    if (!destinationAddress) {
+      setError('No recipient address provided.')
+      setStep('failure')
+      return
+    }
+
+    const amountStroops = parseAmountToStroops(form.amount)
+    if (!amountStroops || amountStroops <= 0n) {
+      setError('Invalid amount.')
+      setStep('failure')
+      return
+    }
+
     setIsSending(true)
-    setSendError(null)
-
-    const [publicKey, network] = await Promise.all([
-      getFreighterPublicKey(),
-      getFreighterNetwork(),
-    ])
-
-    if (!publicKey) {
-      setSendError('Wallet not connected. Please connect Freighter.')
+    try {
+      await api.createRemittance(
+        token,
+        destinationAddress,
+        amountStroops,
+        form.asset.symbol,
+        form.note || undefined
+      )
       setIsSending(false)
-      return
+      setStep('success')
+
+      if (form.recipient?.address) {
+        try {
+          const STORAGE_KEY = 'aframp_contacts'
+          const stored = localStorage.getItem(STORAGE_KEY)
+          const contacts: Contact[] = stored ? JSON.parse(stored) : []
+
+          const address = form.recipient.address
+          const name =
+            form.recipient.name ||
+            contacts.find((c) => c.address === address)?.name ||
+            `${address.slice(0, 6)}...${address.slice(-4)}`
+          const avatar =
+            form.recipient.avatar || contacts.find((c) => c.address === address)?.avatar
+
+          const filtered = contacts.filter((c) => c.address !== address)
+          const updatedContact: Contact = {
+            id: contacts.find((c) => c.address === address)?.id || `${Date.now()}`,
+            name,
+            address,
+            avatar,
+            createdAt:
+              contacts.find((c) => c.address === address)?.createdAt || new Date().toISOString(),
+          }
+          localStorage.setItem(STORAGE_KEY, JSON.stringify([updatedContact, ...filtered]))
+        } catch (err) {
+          console.error('Failed to save contact after send:', err)
+        }
+      }
+    } catch (cause) {
+      setIsSending(false)
+      const errorMsg =
+        cause instanceof Error ? cause.message : 'Transaction failed. Please try again.'
+      // Extract failure_reason if available from API response
+      const failureReasonMsg =
+        cause instanceof Error && 'failureReason' in cause
+          ? (cause as any).failureReason
+          : undefined
+      setError(errorMsg)
+      setFailureReason(failureReasonMsg || null)
+      setStep('failure')
     }
-
-    const result = await sendStellarP2P({
-      sourcePublicKey: publicKey,
-      destination: form.recipient.address,
-      amount: form.amount,
-      assetCode: form.asset.symbol,
-      memo: form.note || undefined,
-      network,
-    })
-
-    setIsSending(false)
-
-    if (result.error || !result.txHash) {
-      setSendError(result.error ?? 'Transaction failed')
-      return
-    }
-
-    setTxHash(result.txHash)
-    setStep('success')
   }
 
-  const isRecipientValid = isValidStellarAddress(recipientInput.trim())
+  const handleRetry = async () => {
+    await handleSend()
+  }
+
+  const isRecipientValid = recipientInput.trim().length > 5
   const isAmountValid = parseFloat(form.amount) > 0
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
-      <div className="w-full max-w-md flex flex-col min-h-screen relative">
+      <div className="w-full max-w-md flex flex-col relative">
         {/* ── Header ── */}
         <header className="flex items-center gap-3 px-5 pt-6 pb-3">
           <button
@@ -197,7 +281,10 @@ export function SendPageClient() {
           <div className="flex flex-col flex-1 px-5 gap-5 pb-8">
             {/* Address input */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <label
+                htmlFor="recipient-address"
+                className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+              >
                 Wallet address or username
               </label>
               <div className="relative">
@@ -205,6 +292,7 @@ export function SendPageClient() {
                   <Wallet className="w-4 h-4" />
                 </div>
                 <Input
+                  id="recipient-address"
                   value={recipientInput}
                   onChange={(e) => setRecipientInput(e.target.value)}
                   placeholder="G... or @username"
@@ -219,8 +307,8 @@ export function SendPageClient() {
                 </button>
               </div>
               {recipientInput && !isRecipientValid && (
-                <p className="text-xs text-destructive">
-                  Enter a valid Stellar address (starts with G, 56 characters)
+                <p className="text-xs text-muted-foreground">
+                  Enter a valid Stellar address (starts with G)
                 </p>
               )}
             </div>
@@ -244,7 +332,7 @@ export function SendPageClient() {
 
         {/* ── Amount Step ── */}
         {step === 'amount' && (
-          <div className="flex flex-col flex-1 px-5 pb-6 gap-4">
+          <div className="flex flex-col flex-1 px-5 pb-6 gap-4 min-h-0">
             {/* Recipient pill */}
             <button
               onClick={() => setStep('recipient')}
@@ -265,7 +353,7 @@ export function SendPageClient() {
             </button>
 
             {/* Amount display */}
-            <div className="flex-1 flex flex-col items-center justify-center gap-2 min-h-[140px]">
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 min-h-[120px] md:min-h-[140px] max-h-[280px] shrink-0 overflow-hidden">
               <div className="flex items-baseline gap-2">
                 <span
                   className={cn(
@@ -286,7 +374,7 @@ export function SendPageClient() {
 
               {/* Asset selector */}
               <div className="flex gap-2 mt-1">
-                {ASSETS.map((asset) => (
+                {assets.map((asset) => (
                   <button
                     key={asset.symbol}
                     onClick={() => setForm((prev) => ({ ...prev, asset }))}
@@ -320,21 +408,31 @@ export function SendPageClient() {
             </div>
 
             {/* Numpad */}
-            <div className="grid grid-cols-3 gap-1.5">
-              {NUMPAD_KEYS.flat().map((key) => (
-                <button
-                  key={key}
-                  onClick={() => handleNumpad(key)}
-                  className={cn(
-                    'h-14 rounded-xl font-semibold text-lg transition-all duration-100 active:scale-95',
-                    key === '⌫'
-                      ? 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      : 'bg-muted/50 hover:bg-muted/80 active:bg-muted'
-                  )}
-                >
-                  {key}
-                </button>
-              ))}
+            <div className="grid grid-cols-3 gap-1.5 mt-auto">
+              {NUMPAD_KEYS.flat().map((key) => {
+                const buttonLabel =
+                  key === '⌫'
+                    ? 'Delete amount'
+                    : key === '.'
+                      ? 'Add decimal point'
+                      : `Enter amount ${key}`
+
+                return (
+                  <button
+                    key={key}
+                    aria-label={buttonLabel}
+                    onClick={() => handleNumpad(key)}
+                    className={cn(
+                      'h-14 rounded-xl font-semibold text-lg transition-all duration-100 active:scale-95',
+                      key === '⌫'
+                        ? 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                        : 'bg-muted/50 hover:bg-muted/80 active:bg-muted'
+                    )}
+                  >
+                    {key}
+                  </button>
+                )
+              })}
             </div>
 
             {/* CTA */}
@@ -349,18 +447,18 @@ export function SendPageClient() {
           </div>
         )}
 
-        {/* ── Confirm & Success Steps ── */}
-        {(step === 'confirm' || step === 'success') && (
+        {/* ── Confirm, Success & Failure Steps ── */}
+        {(step === 'confirm' || step === 'success' || step === 'failure') && (
           <TransactionConfirmation
             form={form}
             step={step}
             isSending={isSending}
-            sendError={sendError}
-            txHash={txHash}
-            estimatedFee={estimatedFee}
-            onBack={() => setStep('amount')}
+            error={error}
+            failureReason={failureReason}
+            onBack={() => (step === 'failure' ? setStep('confirm') : setStep('amount'))}
             onConfirm={handleSend}
-            onDone={() => router.push('/dashboard')}
+            onDone={() => router.push('/home')}
+            onRetry={handleRetry}
           />
         )}
       </div>

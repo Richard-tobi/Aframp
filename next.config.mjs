@@ -1,13 +1,65 @@
+import { withSentryConfig } from '@sentry/nextjs'
+import withBundleAnalyzer from '@next/bundle-analyzer'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
+  experimental: {
+    // Limit concurrency only in resource-constrained CI environments.
+    // Set CI_LOW_RESOURCES=1 in your CI pipeline to enable these caps;
+    // leave it unset for normal development and production builds so they
+    // use all available CPU cores.
+    ...(process.env.CI_LOW_RESOURCES
+      ? {
+          cpus: 1,
+          staticGenerationMaxConcurrency: 1,
+          staticGenerationMinPagesPerWorker: 1,
+        }
+      : {}),
   },
   images: {
-    unoptimized: true,
+    unoptimized: false,
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
   },
-  // Enable standalone output for Docker deployments
   output: 'standalone',
+  // The browser only ever calls this app's own origin at `/backend/*`; this
+  // forwards those requests server-side to the real backend. NEXT_API_URL
+  // (deliberately not NEXT_PUBLIC_*) never reaches client-side code — it
+  // can't leak via devtools, a bundle diff, or CSP `connect-src`.
+  // See docs/adr-001-backend-proxy.md for the rationale and consequences.
+  rewrites() {
+    const backendUrl = (process.env.NEXT_API_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '')
+    return [
+      {
+        source: '/backend/:path*',
+        destination: `${backendUrl}/:path*`,
+      },
+    ]
+  },
+  headers() {
+    // NOTE: The Content-Security-Policy header with per-request nonce is now
+    // set by middleware.ts (#632). The static-file entries below apply only to
+    // assets that bypass middleware (e.g. _next/static) and therefore do NOT
+    // include script-src so they don't clobber the nonce injected by the
+    // middleware on page routes.
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
+    ]
+  },
 }
 
-export default nextConfig
+const withAnalyzer = withBundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+  openAnalyzer: false,
+})
+
+export default withSentryConfig(withAnalyzer(nextConfig))

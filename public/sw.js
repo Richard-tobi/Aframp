@@ -1,0 +1,1 @@
+importScripts('/push-handler.js')

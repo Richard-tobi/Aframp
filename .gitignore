@@ -9,3 +9,9 @@ build
 requirements.md
 .vercel
 .env*.local
+coverage/
+test-results/
+playwright-report/
+.claude 
+tsconfig.tsbuildinfo
+designs

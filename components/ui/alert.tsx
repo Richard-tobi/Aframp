@@ -11,6 +11,8 @@ const alertVariants = cva(
         default: 'bg-background text-foreground',
         destructive:
           'border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive',
+        /** A connectivity blip, not a mistake — calm and muted, not alarm-red. */
+        notice: 'border-border bg-muted/40 text-muted-foreground [&>svg]:text-muted-foreground',
       },
     },
     defaultVariants: {
@@ -29,6 +31,7 @@ Alert.displayName = 'Alert'
 
 const AlertTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
   ({ className, ...props }, ref) => (
+    // eslint-disable-next-line jsx-a11y/heading-has-content -- content comes from props.children at call sites
     <h5
       ref={ref}
       className={cn('mb-1 font-medium leading-none tracking-tight', className)}

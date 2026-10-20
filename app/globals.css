@@ -16,7 +16,7 @@
   --secondary: oklch(0.95 0.01 90);
   --secondary-foreground: oklch(0.15 0.01 60);
   --muted: oklch(0.94 0.01 90);
-  --muted-foreground: oklch(0.38 0.01 60);
+  --muted-foreground: oklch(0.44 0.01 60);
   --accent: oklch(0.75 0.15 85);
   --accent-foreground: oklch(0.15 0.01 60);
   --destructive: oklch(0.577 0.245 27.325);
@@ -54,9 +54,9 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-manrope), 'Manrope Fallback', sans-serif;
-  --font-display: var(--font-cal-sans), 'Outfit Fallback', sans-serif;
-  --font-heading: var(--font-instrument-sans), 'Space Mono Fallback', monospace;
+  --font-sans: 'Manrope', 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-display: 'Outfit', 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-heading: 'Space Mono', 'SFMono-Regular', Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -120,6 +120,41 @@
 
 .border-beam {
   animation: border-beam 8s linear infinite;
+}
+
+/* Loading skeletons: a soft pulse with a light sweep across it. */
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-sweep {
+  animation: skeleton-sweep 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton-sweep {
+    animation: none;
+  }
 }
 
 /* Shimmer animation for CTA */
@@ -314,4 +349,74 @@
 
 .celebrate {
   animation: celebrate 0.6s ease-in-out;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Aframp wallet dashboard
+   Surface and brand values sampled from designs/Background.png.
+   Scoped to their own token names so the Pay light theme above
+   is untouched.
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --color-brand: #33cc33;
+  --color-brand-deep: #035703;
+  --color-cta-from: #34cd39;
+  --color-cta-to: #48dc7a;
+
+  --color-pos: #4ade80;
+  --color-neg: #db6665;
+
+  --color-ink: #0f0d0c;
+  --color-rail: #0b0b0b;
+  --color-panel: #080503;
+  --color-raised: #151414;
+  --color-hairline: #1f1e1d;
+  --color-nav-active: #232425;
+
+  --color-dim: #a6a8ac;
+  --color-bright: #c9cbcf;
+
+  --font-brand: var(--font-atkinson), ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Landing page surfaces, sampled from designs/Aframp landing Page.png.
+   Same brand green as the dashboard (#33cc33) — only the section and
+   card grounds differ, so they get their own names. */
+@theme {
+  --color-band: #0f0b09;
+  --color-surface: #110c09;
+  --color-edge: #2d2824;
+}
+
+/* Partner logo marquee on the home page. Halts for reduced-motion users. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* The lane renders the list twice, so half a lane is one full loop. */
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 32s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
+
+/* Light landing page, sampled from designs/1920w light(1).png.
+   Brand green matches the other designs (#33cc33); the rest of this
+   palette is specific to the light direction. */
+@theme {
+  --color-mint: #ebffeb;
+  --color-lavender: #f5f4fc;
+  --color-charcoal: #1e1e1e;
+  --color-accent-purple: #7146eb;
+  --color-accent-pink: #ee7fc4;
+  --color-accent-teal: #18bac0;
 }
