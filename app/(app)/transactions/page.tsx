@@ -33,6 +33,8 @@ const EXPLORER_BASE = `https://stellar.expert/explorer/${
   process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'PUBLIC' ? 'public' : 'testnet'
 }/tx`
 
+const PAGE_SIZE = 50
+
 const STATUS_LABEL: Record<PaymentStatus, string> = {
   detected: 'Incoming',
   verified: 'Confirming',
@@ -84,16 +86,20 @@ export default function TransactionsPage() {
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'all'>('all')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
       setError(null)
       try {
         const [nextPayments, nextRefunds] = await Promise.all([
-          api.listTransactions(token, 50, signal),
+          api.listTransactions(token, PAGE_SIZE, signal),
           api.listRefunds(token, 20, signal),
         ])
         setPayments(nextPayments)
+        setHasMore(nextPayments.length === PAGE_SIZE)
         setRefunds(nextRefunds)
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return
@@ -106,6 +112,35 @@ export default function TransactionsPage() {
     },
     [token]
   )
+
+  const loadMore = useCallback(async () => {
+    if (!payments || payments.length === 0) return
+    setLoadingMore(true)
+    setLoadMoreError(null)
+    try {
+      const cursor = payments[payments.length - 1].id
+      const nextPayments = await api.listTransactions(token, PAGE_SIZE, undefined, cursor)
+      setPayments((current) => {
+        const existing = current ?? []
+        const seen = new Set(existing.map((payment) => payment.id))
+        const merged = [...existing]
+        for (const payment of nextPayments) {
+          if (!seen.has(payment.id)) {
+            seen.add(payment.id)
+            merged.push(payment)
+          }
+        }
+        return merged
+      })
+      setHasMore(nextPayments.length === PAGE_SIZE)
+    } catch (cause) {
+      setLoadMoreError(
+        cause instanceof Error ? cause.message : 'Could not load older payments'
+      )
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [payments, token])
 
   const openRefundDialog = useCallback((payment: Payment) => {
     setRefundTarget(payment)
@@ -237,27 +272,26 @@ export default function TransactionsPage() {
           )}
         </div>
         {refundNotice && (
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
             {refundNotice}
           </div>
         )}
-      </header>
-
-      {payments.length > 0 && (
-        <div className="mt-6 grid gap-3 sm:grid-cols-4">
-          <div className="space-y-1 sm:col-span-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="transaction-search">Search</Label>
             <DebouncedSearchInput onSearch={setSearchQuery} />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor="transaction-status">Status</Label>
             <select
               id="transaction-status"
-              className="border-hairline bg-panel h-9 w-full rounded-md border px-2 text-sm"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as PaymentStatus | 'all')}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as PaymentStatus | 'all')
+              }
             >
-              <option value="all">All</option>
+              <option value="all">All statuses</option>
               {FILTERABLE_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {STATUS_LABEL[status]}
@@ -266,7 +300,7 @@ export default function TransactionsPage() {
             </select>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <Label htmlFor="transaction-from">From</Label>
               <Input
                 id="transaction-from"
@@ -275,7 +309,7 @@ export default function TransactionsPage() {
                 onChange={(event) => setFromDate(event.target.value)}
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <Label htmlFor="transaction-to">To</Label>
               <Input
                 id="transaction-to"
@@ -286,155 +320,130 @@ export default function TransactionsPage() {
             </div>
           </div>
         </div>
-      )}
+      </header>
 
-      {payments.length === 0 ? (
-        <div className="mt-6 flex flex-col items-center gap-3 py-12 text-center">
-          <EmptyStateIllustration variant="empty" className="size-20" />
-          <p className="text-dim text-sm">
-            No payments yet. Charge a customer and they&apos;ll show up here.
-          </p>
-        </div>
-      ) : (
-        <ul className="border-hairline mt-6 divide-y">
-          {filteredPayments.map((payment) => (
-            <li key={payment.id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0 space-y-1">
-                <p className="text-base font-bold tabular-nums text-white">
-                  {formatStroops(payment.amount_stroops)} {payment.asset}
-                </p>
-                <p className="text-dim text-xs">
-                  {formatDateTime(payment.created_at)} ·{' '}
-                  <a
-                    href={`${EXPLORER_BASE}/${payment.tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:text-bright underline underline-offset-2"
-                  >
-                    Receipt
-                  </a>
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {payment.status === 'confirmed' && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-dim"
-                    onClick={() => openRefundDialog(payment)}
-                    disabled={refundingId === payment.id}
-                  >
-                    {refundingId === payment.id ? 'Refunding…' : 'Refund'}
-                  </Button>
-                )}
-                <Badge
-                  variant={statusVariant(payment.status)}
-                  role="status"
-                  aria-live="polite"
-                  aria-label={`Payment status: ${STATUS_LABEL[payment.status] ?? payment.status}`}
-                >
-                  {STATUS_LABEL[payment.status] ?? payment.status}
-                </Badge>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="mt-6">
+        {filteredPayments.length === 0 ? (
+          <EmptyStateIllustration
+            title="No payments found"
+            description="Payments will appear here once you receive your first transfer."
+          />
+        ) : (
+          <div className="overflow-x-auto rounded-xl border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Date</th>
+                  <th className="px-4 py-3 font-medium">Amount</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Transaction</th>
+                  <th className="px-4 py-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPayments.map((payment) => (
+                  <tr key={payment.id} className="border-t">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {formatDateTime(payment.created_at)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {formatStroops(payment.amount_stroops)} {payment.asset}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={statusVariant(payment.status)}>
+                        {STATUS_LABEL[payment.status] ?? payment.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <a
+                        className="text-primary underline-offset-4 hover:underline"
+                        href={`${EXPLORER_BASE}/${payment.tx_hash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {payment.tx_hash.slice(0, 8)}…
+                      </a>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={refundingId === payment.id}
+                        onClick={() => openRefundDialog(payment)}
+                      >
+                        Refund
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-      <Dialog
-        open={refundDialogOpen}
-        onOpenChange={(open) => {
-          setRefundDialogOpen(open)
-          if (!open) {
-            setRefundTarget(null)
-            setRefundAmount('')
-            setRefundRecipient('')
-            setRefundReason('')
-            setRefundFormError(null)
-          }
-        }}
-      >
+        {hasMore && (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            {loadMoreError && (
+              <p className="text-sm text-destructive">{loadMoreError}</p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loadingMore}
+              onClick={() => void loadMore()}
+            >
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <Dialog open={refundDialogOpen} onOpenChange={setRefundDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Refund payment</DialogTitle>
+            <DialogTitle>Request a refund</DialogTitle>
             <DialogDescription>
-              Enter the refund amount and recipient for this confirmed payment.
+              Refund a payment back to the original wallet.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleRefund} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="refund-amount">Refund amount</Label>
+          <form className="space-y-4" onSubmit={handleRefund}>
+            <div className="space-y-1.5">
+              <Label htmlFor="refund-amount">Amount</Label>
               <Input
                 id="refund-amount"
-                type="text"
                 inputMode="decimal"
-                placeholder={`Up to ${formatStroops(refundTarget?.amount_stroops ?? 0n)} ${refundTarget?.asset ?? ''}`}
                 value={refundAmount}
                 onChange={(event) => setRefundAmount(event.target.value)}
-                aria-invalid={Boolean(refundFormError)}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="refund-recipient">Recipient address</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="refund-recipient">Recipient</Label>
               <Input
                 id="refund-recipient"
-                type="text"
                 value={refundRecipient}
                 onChange={(event) => setRefundRecipient(event.target.value)}
-                aria-invalid={Boolean(refundFormError)}
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="refund-reason">Reason (optional)</Label>
               <Textarea
                 id="refund-reason"
                 value={refundReason}
                 onChange={(event) => setRefundReason(event.target.value)}
-                rows={3}
-                placeholder="Customer requested a refund"
               />
             </div>
-            {refundFormError && <p className="text-sm text-destructive">{refundFormError}</p>}
+            {refundFormError && (
+              <p className="text-sm text-destructive">{refundFormError}</p>
+            )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRefundDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={refundingId !== null || !refundTarget}>
-                {refundingId === refundTarget?.id ? 'Refunding…' : 'Confirm refund'}
+              <Button type="submit" disabled={refundingId !== null}>
+                {refundingId ? 'Submitting…' : 'Request refund'}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
-
-      <section className="mt-8 space-y-3">
-        <h2 className="text-lg font-semibold">Refunds</h2>
-        {refunds.length === 0 ? (
-          <p className="text-dim text-sm">No refunds yet.</p>
-        ) : (
-          <ul className="border-hairline divide-y rounded-2xl border">
-            {refunds.map((refund) => (
-              <li
-                key={refund.id}
-                className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
-              >
-                <span className="tabular-nums font-medium">
-                  {formatStroops(refund.amount_stroops)} {refund.asset}
-                </span>
-                <Badge
-                  variant={refund.status === 'completed' ? 'default' : 'secondary'}
-                  role="status"
-                  aria-live="polite"
-                  aria-label={`Refund status: ${refund.status}`}
-                >
-                  {refund.status}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   )
 }
