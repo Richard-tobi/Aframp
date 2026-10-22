@@ -473,7 +473,7 @@ npx playwright show-report
 
 ### Diff Coverage (80% on changed files)
 
-**What it checks:** Every source file you added or changed in this branch (under `app/`, `components/`, `lib/`, `hooks/`) must have ≥80% statement *and* line coverage. This is stricter than the repo-wide 70% floor — it applies only to what your PR touches.
+**What it checks:** Every source file you added or changed in this branch (under `app/`, `components/`, `lib/`, `hooks/`) must have ≥80% statement _and_ line coverage. This is stricter than the repo-wide 70% floor — it applies only to what your PR touches.
 
 The check reads `coverage/coverage-summary.json`, so run the Jest coverage step first:
 
@@ -533,6 +533,7 @@ Bundle budget exceeded for 1 route(s). Maximum route-specific JS is 40 KB gzippe
 ```
 
 To reduce a route's weight:
+
 - Move heavy imports behind `next/dynamic` so they are code-split and not counted.
 - Audit `import` statements in the page and its direct dependencies with the analyzer report.
 - Replace large libraries with lighter alternatives.

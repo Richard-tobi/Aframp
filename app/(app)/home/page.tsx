@@ -27,9 +27,6 @@ const RevenueChart = dynamic(
   }
 )
 
-// The dashboard only surfaces recent activity; full history lives on /transactions.
-const RECENT_PAYMENTS_LIMIT = 10
-
 interface DashboardData {
   balances: Awaited<ReturnType<typeof api.getBalances>>
   payments: Payment[]
@@ -45,7 +42,7 @@ export default function HomePage() {
     async (signal) => {
       const [balances, payments, requests, wallet, withdrawals] = await Promise.all([
         api.getBalances(token, signal),
-        api.listTransactions(token, RECENT_PAYMENTS_LIMIT, signal),
+        api.listTransactions(token, 50, signal),
         api.listPaymentRequests(token, 20, signal),
         // Only used to tick off the getting-started steps, so a failure here
         // shouldn't take the whole dashboard down.
