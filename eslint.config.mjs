@@ -55,4 +55,4 @@ const config = [
   prettierConfig,
 ]
 
-export default config
+export default config;
